@@ -1,0 +1,4 @@
+interface:
+  display_name: "CFST Paper Extractor"
+  short_description: "Prepare, validate, and export ordinary-CFST extraction data for ML/DL workflows"
+  default_prompt: "Use the enhanced rules to prepare MinerU parsed files, extract one-paper CFST data into schema v2 JSON, validate provenance and physical plausibility, and support unified dataset export."
