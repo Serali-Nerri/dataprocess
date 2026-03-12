@@ -2,6 +2,13 @@
 
 Use this file as the extraction source of truth for one paper.
 
+Section map:
+
+- `## 1. Target Scope`: decide whether the paper is usable at all.
+- `## 2. Ordinary-CFST Gate`: decide whether a valid paper belongs in the ordinary dataset.
+- `## 3-6`: apply schema shape, group mapping, paper-level fields, and specimen fields.
+- `## 7-12`: apply evidence, loading, numeric, length, table-corruption, and invalid-output rules.
+
 ## 1. Target Scope
 
 This workflow is for experimental CFST column papers that can support a unified ML/DL dataset for ultimate axial or eccentric compression resistance.
@@ -20,6 +27,8 @@ The v2 schema separates:
 - `is_valid`
 - `is_ordinary_cfst`
 - `ordinary_filter.include_in_dataset`
+
+The ordinary decision is intentionally paper-level in v2. Use it as a clean-paper gate: if any specimen set in a valid paper falls outside the ordinary scope, keep the whole paper `is_ordinary_cfst=false` and `ordinary_filter.include_in_dataset=false`.
 
 ### 2.1 Include As Ordinary CFST
 
@@ -82,6 +91,8 @@ Required top-level keys:
 Recommended `schema_version` value:
 
 - `cfst-paper-extractor-v2`
+
+Published `output/<paper_id>.json` files are the canonical dataset artifact. Any downstream tabular conversion is project-specific and outside this skill's canonical schema.
 
 ## 4. Group Mapping
 
@@ -171,6 +182,8 @@ Required keys:
 - `image_path`
 - `page`
 
+`boundary_condition` is trace metadata. Keep any defensible text the paper provides, but `null` or `unknown` is acceptable when the support condition cannot be recovered confidently. Do not derive `L` from boundary condition alone.
+
 ## 6. Required Specimen Fields
 
 Every specimen row in `Group_A`, `Group_B`, or `Group_C` must contain:
@@ -245,16 +258,29 @@ Every specimen row in `Group_A`, `Group_B`, or `Group_C` must contain:
 
 - `ref_no`: fixed empty string `""`
 - `specimen_label`: unique, non-empty specimen ID
-- `fc_value`: numeric strength value in MPa
+- `boundary_condition`: trace metadata for the specimen support/end condition; may be `null` or `unknown`
+- `fc_value`: source concrete strength value in MPa
 - `fc_type`: source concrete specimen description, for example `Cube 150` or `Cylinder 100x200`
-- `fc_basis`: normalized basis category for `fc_value`
+- `fc_basis`: basis category of `fc_value`
 - `fy`: steel yield strength in MPa
+- `fcy150`: normalized 150 mm cylinder compressive strength in MPa; keep the key present, but `null` is allowed during extraction when project-level conversion is deferred
 - `r_ratio`: recycled aggregate ratio in percent, use `0` for normal concrete
-- `b`, `h`, `t`, `r0`, `L`, `e1`, `e2`, `n_exp`: unit-free numbers
+- `b`, `h`, `t`, `r0`, `L`, `e1`, `e2`: numbers stored in mm
+- `L`: project geometric specimen length in mm; do not reinterpret it as effective length
+- `n_exp`: experimental ultimate load in kN
 - `source_evidence`: concise human-readable trace string
 - `quality_flags`: list of extraction-risk flags such as `ocr_recovered`, `derived_L`, `unit_converted`
 
 For recycled aggregate concrete, `r_ratio` must record the recycled aggregate replacement ratio `R%`.
+
+### 6.3 Canonical Units
+
+Store numeric values in the published JSON using these canonical units:
+
+- `fc_value`, `fy`, `fcy150`: `MPa`
+- `r_ratio`: `%`
+- `b`, `h`, `t`, `r0`, `L`, `e1`, `e2`: `mm`
+- `n_exp`: `kN`
 
 ## 7. Evidence Contract
 
@@ -274,6 +300,8 @@ Each specimen `evidence` object must contain:
 - `raw_unit`
 - `formula`
 - `source`
+
+When a stored value is converted to canonical units or normalized from another basis, preserve the original text/unit in `value_origin` and mark the step with `kind = normalized` or `quality_flags += ["unit_converted"]` as appropriate.
 
 Example:
 
@@ -304,10 +332,12 @@ Example:
 ## 9. Numerical Rules
 
 - use `scripts/safe_calc.py` for every conversion and derived value
+- convert stored values to the canonical units defined above before writing JSON
 - round numeric outputs to `0.001`
 - enforce:
   - `fc_value > 0`
   - `fy > 0`
+  - `fcy150 > 0` when `fcy150` is populated
   - `b > 0`
   - `h > 0`
   - `t > 0`
@@ -315,6 +345,7 @@ Example:
   - `n_exp > 0`
   - `0 <= r_ratio <= 100`
 - `t` must be strictly smaller than `min(b, h) / 2`
+- keep `fcy150 = null` when the project defers strength-basis conversion; do not fabricate it during extraction
 
 Ordinary-CFST inclusion requires all specimen rows to stay within:
 
@@ -327,15 +358,15 @@ Ordinary-CFST inclusion requires all specimen rows to stay within:
 
 ## 10. Length Rule
 
-Determine `L` with this priority:
+Determine `L` as the project geometric specimen length with this priority:
 
 1. explicit specimen length in paper text/table/note
 2. explicit formula or ratio with clear variable meaning
-3. figure-based derivation with explicit geometry evidence
+3. figure-based derivation with explicit geometry evidence, including steel-tube net height when the figure makes that geometry unambiguous
 
-If the paper does not define `L`, default to steel-tube net height and record the basis in `source_evidence` and `evidence.value_origin.L`.
+If the paper does not name `L` directly but the specimen/setup figure makes the steel-tube net height derivable, use that geometric length and record the basis in `source_evidence` and `evidence.value_origin.L`.
 
-Do not guess `L`.
+Do not populate `L` when the geometry basis is ambiguous. Do not infer `L` from boundary-condition assumptions or effective-length formulas.
 
 ## 11. Markdown Table Corruption Gate
 

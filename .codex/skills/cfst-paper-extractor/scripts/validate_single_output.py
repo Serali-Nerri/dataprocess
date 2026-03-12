@@ -54,6 +54,7 @@ SPECIMEN_KEYS = {
 }
 
 NUMERIC_FIELDS = {"fc_value", "fy", "r_ratio", "b", "h", "t", "r0", "L", "e1", "e2", "n_exp"}
+NULLABLE_NUMERIC_FIELDS = {"fcy150"}
 
 SECTION_SHAPES = {
     "square",
@@ -263,8 +264,8 @@ def _validate_paper_level(obj: Any, errors: list[str]) -> None:
     loading_pattern = obj.get("loading_pattern")
     if loading_pattern is not None and loading_pattern not in LOADING_PATTERNS:
         errors.append(f"`paper_level.loading_pattern` invalid: {loading_pattern}")
-    if "boundary_condition" in obj and not isinstance(obj["boundary_condition"], str):
-        errors.append("`paper_level.boundary_condition` must be string.")
+    if "boundary_condition" in obj and obj["boundary_condition"] is not None and not isinstance(obj["boundary_condition"], str):
+        errors.append("`paper_level.boundary_condition` must be string or null.")
     if "notes" in obj:
         _validate_string_list(obj["notes"], "paper_level.notes", errors)
     if "expected_specimen_count" in obj and obj["expected_specimen_count"] is not None:
@@ -334,6 +335,9 @@ def _validate_specimen(
     for key in NUMERIC_FIELDS:
         if key in specimen and not _is_number(specimen[key]):
             errors.append(f"`{tag}.{key}` must be numeric.")
+    for key in NULLABLE_NUMERIC_FIELDS:
+        if key in specimen and specimen[key] is not None and not _is_number(specimen[key]):
+            errors.append(f"`{tag}.{key}` must be numeric or null.")
 
     if "ref_no" in specimen:
         if not isinstance(specimen["ref_no"], str):
@@ -363,8 +367,8 @@ def _validate_specimen(
         elif mode not in ROW_LOADING_MODES:
             errors.append(f"`{tag}.loading_mode` invalid: {mode}")
 
-    if "boundary_condition" in specimen and not isinstance(specimen["boundary_condition"], str):
-        errors.append(f"`{tag}.boundary_condition` must be string.")
+    if "boundary_condition" in specimen and specimen["boundary_condition"] is not None and not isinstance(specimen["boundary_condition"], str):
+        errors.append(f"`{tag}.boundary_condition` must be string or null.")
 
     if "fc_type" in specimen:
         if not isinstance(specimen["fc_type"], str):
@@ -415,6 +419,8 @@ def _validate_specimen(
     for key in ("fc_value", "fy", "b", "h", "t", "L", "n_exp"):
         if key in specimen and _is_number(specimen[key]) and specimen[key] <= 0:
             errors.append(f"`{tag}.{key}` must be > 0.")
+    if "fcy150" in specimen and _is_number(specimen["fcy150"]) and specimen["fcy150"] <= 0:
+        errors.append(f"`{tag}.fcy150` must be > 0 when populated.")
     if "r_ratio" in specimen and _is_number(specimen["r_ratio"]):
         if specimen["r_ratio"] < 0 or specimen["r_ratio"] > 100:
             errors.append(f"`{tag}.r_ratio` must be between 0 and 100.")
@@ -448,7 +454,7 @@ def _validate_specimen(
             if _roughly_equal(specimen["e1"], 0.0) and _roughly_equal(specimen["e2"], 0.0):
                 errors.append(f"`{tag}` eccentric row cannot have both e1 and e2 equal to 0.")
 
-    for key in NUMERIC_FIELDS:
+    for key in NUMERIC_FIELDS | NULLABLE_NUMERIC_FIELDS:
         if key in specimen and _is_number(specimen[key]) and not _has_3dp(specimen[key]):
             msg = f"`{tag}.{key}` is not rounded to 0.001: {specimen[key]}"
             if strict_rounding:

@@ -1,44 +1,15 @@
 ---
 name: cfst-paper-extractor
-description: Enhanced CFST paper extractor with ordinary-CFST filtering, schema v2 validation, strict worker sandbox isolation, and parallel worker orchestration.
+description: Extract specimen-level data from MinerU-parsed CFST paper folders into schema-v2 JSON, validate ordinary-CFST inclusion, provenance, and physical plausibility, orchestrate isolated one-paper workers, and publish canonical JSON outputs. Use when Codex needs to prepare raw MinerU parses, extract one or many CFST experimental papers, repair or review CFST JSON outputs, or build unified ML/DL-ready datasets from ordinary and special-case CFST studies.
 ---
 
 # CFST Paper Extractor
 
-## Overview
+Use only bundled files in this skill. Do not depend on external metadata manifests.
 
-This skill builds an ML/DL-ready ordinary CFST column dataset from MinerU-parsed papers.
+## Use This Workflow
 
-Core upgrades over v1:
-
-- ordinary-CFST inclusion gate
-- schema v2 with paper-level and field-level provenance
-- stricter physical validation
-- preprocess manifests for `table/` evidence
-- batch manifests and worker-job planning
-- unified flat CSV export
-- explicit publish logs
-- mandatory worker sandbox isolation
-- mandatory parallel worker orchestration
-
-Keep this skill self-contained:
-
-- use only scripts and references inside this skill directory
-- do not depend on `Reffernce.md` or any external metadata manifest
-
-## Runtime Variables
-
-- `<raw_root>`: root containing raw MinerU paper folders
-- `<batch_root>`: one batch run root under the current workspace
-- `<paper_id>`: citation-style paper id such as `A1-1`
-- `<paper_dir_relpath>`: one normalized paper folder path relative to repo root
-- `<worker_output_json_path>`: worker-local JSON path under `<batch_root>/tmp/<paper_id>/<paper_id>.json`
-- `<final_output_json_path>`: final published JSON path under `<batch_root>/output/<paper_id>.json`
-- `<expected_specimen_count>`: expected specimen count when known
-
-## Recommended Workflow
-
-### 1. Prepare batch assets
+1. Prepare a batch workspace from raw MinerU paper folders.
 
 ```bash
 python .codex/skills/cfst-paper-extractor/scripts/prepare_batch.py \
@@ -46,44 +17,32 @@ python .codex/skills/cfst-paper-extractor/scripts/prepare_batch.py \
   --output-root runs/a1_demo
 ```
 
-Outputs:
+This creates `parsed_with_tables/`, `manifests/`, `tmp/`, `output/`, and `logs/`.
 
-- `manifests/batch_manifest.json`
-- `manifests/worker_jobs.json`
-- `manifests/batch_state.json`
-- `parsed_with_tables/<paper_id>/`
+2. Before extracting or repairing a paper, read:
 
-### 2. Extract one paper
+- `references/extraction-rules.md` for schema, ordinary-CFST rules, evidence requirements, and numeric constraints.
+- `references/single-flow.md` for the worker contract, execution order, setup-image and table-recovery rules, and retry behavior.
 
-Read:
+To jump within those files, run:
 
-- `references/extraction-rules.md`
-- `references/single-flow.md`
+```bash
+rg -n "^## " .codex/skills/cfst-paper-extractor/references/extraction-rules.md \
+  .codex/skills/cfst-paper-extractor/references/single-flow.md
+```
 
-Target schema:
-
-- `schema_version`
-- `paper_id`
-- `is_valid`
-- `is_ordinary_cfst`
-- `reason`
-- `ordinary_filter`
-- `ref_info`
-- `paper_level`
-- `Group_A`
-- `Group_B`
-- `Group_C`
-
-### 3. Validate one paper
+3. Write one paper only to its worker-local temp JSON, then validate it.
 
 ```bash
 python .codex/skills/cfst-paper-extractor/scripts/validate_single_output.py \
-  --json-path <worker_output_json_path> \
+  --json-path runs/a1_demo/tmp/A1-1/A1-1.json \
   --expect-valid true \
   --strict-rounding
 ```
 
-### 4. Publish validated outputs
+Add `--expect-count N` when the paper has a known specimen count.
+
+4. After workers finish, publish validated JSON outputs. Treat `output/<paper_id>.json` as the canonical downstream artifact.
 
 ```bash
 python .codex/skills/cfst-paper-extractor/scripts/publish_validated_output.py \
@@ -93,44 +52,51 @@ python .codex/skills/cfst-paper-extractor/scripts/publish_validated_output.py \
   --publish-log runs/a1_demo/logs/publish_log.jsonl
 ```
 
-### 5. Export unified CSV
+5. When running a long batch inside a git repo, checkpoint published outputs only when needed.
 
 ```bash
-python .codex/skills/cfst-paper-extractor/scripts/export_unified_dataset.py \
-  --input-dir runs/a1_demo/output \
-  --output-csv runs/a1_demo/exports/unified_dataset.csv
+python .codex/skills/cfst-paper-extractor/scripts/checkpoint_output_commits.py \
+  --processed-count 10 \
+  --output-dir runs/a1_demo/output
 ```
 
-## Mandatory Agent Model
+## Respect These Contracts
 
-Use a parent-child model for every extraction task:
+### Batch orchestration
 
-1. Parent agent is orchestrator and reviewer only.
-2. Parent MUST spawn one worker sub-agent per paper folder.
-3. Parent MUST enforce a hard concurrency cap of 5 active worker sub-agents.
-4. Each worker MUST process exactly one paper folder.
-5. Each worker MUST complete extraction, calculation, validation, and JSON write for its own folder.
-6. Parent preflight is limited to git/path checks and script-based preprocess.
-7. Parent MUST NOT manually read raw paper markdown/json/images once workers are launched.
-8. Parent MUST tell each worker the repository may be concurrently modified by other workers.
-9. Parent MUST declare worker ownership paths at launch:
-- one paper folder path
-- one worker-local temp JSON path under `tmp/<paper_id>/`
-- one worker worktree path
-10. Worker MUST ignore unrelated repository changes and MUST NOT edit or revert files outside declared ownership.
-11. Parent waits for worker results, records pass/fail, retries only failed workers, then publishes final outputs.
+- Use a parent-child model for every multi-paper extraction.
+- Spawn one worker sub-agent per normalized paper folder.
+- Cap concurrency at 5 active paper workers.
+- Declare worker ownership at launch: one paper folder, one worker-local temp JSON path, and one worker worktree path.
+- Treat the repository as concurrently modified; workers must ignore unrelated changes and must not revert anything outside their ownership.
+- Keep the parent focused on orchestration, validation review, retries, and publication after workers launch.
+- Retry a failed paper once with a focused correction prompt. If it still fails, return the failure reason and temp JSON path.
 
-## Git Repository Gate
+### Worker execution
 
-Run before any worker launch:
+- Process exactly one normalized paper folder.
+- Require these inputs: `<paper_token>.md`, `<paper_token>_content_list_v2.json`, `images/`, and `table/`.
+- Read the markdown first for context, then use setup images and table images as evidence when the references require them.
+- Use `scripts/safe_calc.py` for conversions, rounding, and derived values; do not do ad hoc arithmetic.
+- Preserve eccentricity signs exactly as source evidence shows them.
+- Do not exclude ordinary CFST specimens from the dataset based on the sign pattern of `e1` and `e2` alone.
+- Preserve recycled aggregate replacement ratio `R%` in `r_ratio`.
 
-```bash
-git rev-parse --is-inside-work-tree
-```
+### Output shape
 
-If current directory is not a git repository, stop. Worktree-based isolated execution requires a valid git repo with `HEAD`.
+- Produce the schema-v2 top-level keys `schema_version`, `paper_id`, `is_valid`, `is_ordinary_cfst`, `reason`, `ordinary_filter`, `ref_info`, `paper_level`, `Group_A`, `Group_B`, and `Group_C`.
+- Use the 3-state policy for invalid, valid-non-ordinary, and valid-ordinary papers.
+- Treat `is_valid=false` as an unusable paper.
+- Treat `is_valid=true` and `is_ordinary_cfst=false` as usable but excluded from the ordinary dataset.
+- Treat `is_valid=true` and `is_ordinary_cfst=true` as included in the ordinary dataset.
+- Keep worker output in `tmp/<paper_id>/<paper_id>.json` only.
+- Let the parent publish the final JSON into `output/<paper_id>.json`; workers must never write final outputs directly.
+- Treat published JSON as canonical. Any project-specific tabular conversion should happen outside this skill.
 
-Bootstrap helper:
+### Git and sandbox isolation
+
+- Require a git repository with `HEAD` before creating worktrees.
+- Initialize one when needed:
 
 ```bash
 python .codex/skills/cfst-paper-extractor/scripts/bootstrap_git_repo.py \
@@ -138,102 +104,25 @@ python .codex/skills/cfst-paper-extractor/scripts/bootstrap_git_repo.py \
   --initial-empty-commit
 ```
 
-## Worker Runtime Isolation
+- Create every worker environment with `scripts/git_worktree_isolation.py create`.
+- Launch every worker only through `scripts/worker_sandbox.py`.
+- Require `bubblewrap` or `bwrap`.
+- Treat sandbox startup failure as fatal; do not fall back to unsandboxed execution.
+- Remove finished worktrees with `scripts/git_worktree_isolation.py remove`.
 
-Each paper worker MUST run in its own git worktree and MUST be launched through `scripts/worker_sandbox.py`.
+## Use These Bundled Scripts
 
-Direct worker execution without the sandbox launcher is forbidden.
+- `scripts/prepare_batch.py`: preferred entry point; discover raw paper folders, normalize them, and write manifests/state for worker orchestration.
+- `scripts/reorganize_parsed_with_tables.py`: run standalone only when you need normalization without the full batch wrapper or need a dry run or summary.
+- `scripts/validate_single_output.py`: validate one schema-v2 JSON for shape, provenance, plausibility, ordinary-filter consistency, and rounding.
+- `scripts/publish_validated_output.py`: revalidate worker outputs, publish final JSON, and append a publish log.
+- `scripts/git_worktree_isolation.py`: create and remove per-paper git worktrees with declared sandbox paths.
+- `scripts/worker_sandbox.py`: mandatory worker launcher; never bypass it.
+- `scripts/bootstrap_git_repo.py`: initialize a repo and optional empty commit so worktree execution can start.
+- `scripts/checkpoint_output_commits.py`: commit or push published outputs at fixed intervals when the repository policy calls for output-only checkpoints.
+- `scripts/safe_calc.py`: use for deterministic arithmetic and derived geometry values instead of handwritten calculations.
 
-Create one worker worktree:
+## Read These References
 
-```bash
-python .codex/skills/cfst-paper-extractor/scripts/git_worktree_isolation.py create \
-  --paper-dir <paper_dir_relpath> \
-  --output-dir tmp/<paper_id>
-```
-
-Returned JSON includes:
-
-- `worktree_path`
-- `branch`
-- `paper_rel`
-- `skill_rel`
-- `output_dir`
-- `sandbox_allowed_rw`
-- `sandbox_allowed_ro`
-- `sandbox_entry_cwd`
-
-Launch worker command in sandbox:
-
-```bash
-python .codex/skills/cfst-paper-extractor/scripts/worker_sandbox.py \
-  --worktree-path <worker_worktree_path> \
-  --paper-dir-relpath <paper_rel> \
-  --skill-dir-relpath <skill_rel> \
-  --output-dir <output_dir> \
-  --cwd-mode paper \
-  -- <worker_command>
-```
-
-Sandbox contract:
-
-- `bubblewrap` / `bwrap` is required
-- worker process gets `CFST_SANDBOX=1`
-- sandbox startup failure is fatal; no soft-isolation fallback
-- worker write scope is limited to the owned paper folder and worker temp output dir
-- worker read scope is limited to owned paper folder, this skill, and declared metadata paths
-
-## Final Output Publish Contract
-
-- worker MUST write only to `<worker_output_json_path>`
-- worker MUST NOT read or write final published output folders directly
-- parent MUST publish final JSON only to `<final_output_json_path>`
-- parent publish is the only allowed transition from temp output to final output
-- parent records publish log and then removes finished worker worktrees
-
-Cleanup helper:
-
-```bash
-python .codex/skills/cfst-paper-extractor/scripts/git_worktree_isolation.py remove \
-  --worktree-path <worker_worktree_path> \
-  --branch <worker_branch> \
-  --delete-branch
-```
-
-## Retry Strategy
-
-Use deterministic retry at worker level:
-
-1. First run: worker performs full extraction and validation.
-2. If validation fails: worker fixes issues and reruns validation once.
-3. If still failing: worker returns failure reason and intermediate JSON path.
-4. Parent may respawn a failed paper worker at most one additional time with a focused correction prompt.
-
-## Ordinary-CFST Policy
-
-Use three states instead of a single valid/invalid split:
-
-- `is_valid=false`: not a usable CFST experimental paper
-- `is_valid=true`, `is_ordinary_cfst=false`: usable but not part of the ordinary-CFST training set
-- `is_valid=true`, `is_ordinary_cfst=true`: include in dataset
-
-Ordinary-CFST inclusion in this workspace means:
-
-- shape is circular, square, rectangular, or round-ended
-- steel is carbon steel
-- test is ambient-temperature, static, monotonic compression
-- loading is axial or single-direction eccentric compression
-- concrete may be normal, high-strength, or recycled aggregate concrete
-- recycled aggregate replacement ratio `R%` must be preserved in `r_ratio`
-- `e1` and `e2` may have the same sign or opposite signs; sign alone is not an exclusion rule
-
-Typical exclusion tags:
-
-- `stainless_steel`
-- `lightweight_concrete`
-- `self_consolidating_concrete`
-- `uhpc`
-- `stiffened_section`
-- `fire_exposed`
-- `durability_conditioned`
-- `nonstandard_section_family`
+- `references/extraction-rules.md`: use for schema details, group mapping, required fields, evidence format, loading-mode decisions, numeric rules, and invalid-output handling.
+- `references/single-flow.md`: use for one-paper worker sequencing, required input layout, table-recovery triggers, setup-figure rules, and validation expectations.

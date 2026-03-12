@@ -118,7 +118,6 @@ def main() -> int:
     manifests_dir = output_root / "manifests"
     normalized_root = output_root / "parsed_with_tables"
     logs_dir = output_root / "logs"
-    exports_dir = output_root / "exports"
     tmp_dir = output_root / "tmp"
     final_output_dir = output_root / "output"
 
@@ -206,7 +205,7 @@ def main() -> int:
     }
 
     if not args.dry_run:
-        for directory in (manifests_dir, logs_dir, exports_dir, tmp_dir, final_output_dir):
+        for directory in (manifests_dir, logs_dir, tmp_dir, final_output_dir):
             directory.mkdir(parents=True, exist_ok=True)
         write_json(manifests_dir / "batch_manifest.json", batch_manifest)
         write_json(manifests_dir / "worker_jobs.json", worker_jobs)

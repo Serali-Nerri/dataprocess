@@ -2,6 +2,13 @@
 
 Use this file as the worker execution contract for one paper.
 
+Section map:
+
+- `## 1-3`: enforce worker scope, required inputs, and execution order.
+- `## 4-5`: apply validity and ordinary-CFST gates.
+- `## 6-9`: resolve setup figures, recover corrupted tables, and preserve numeric and evidence traces.
+- `## 10-11`: enforce validation expectations and final output goals.
+
 ## 1. Worker Contract
 
 - process exactly one paper folder
@@ -58,6 +65,8 @@ For invalid papers:
 ## 5. Ordinary-CFST Gate
 
 Even when `is_valid=true`, decide whether the paper belongs in the ordinary-CFST dataset.
+
+This gate is intentionally paper-level. If a valid paper mixes ordinary and special specimens, keep the whole paper non-ordinary instead of selecting a specimen subset.
 
 Allow ordinary inclusion only when all hold:
 
@@ -121,13 +130,16 @@ Then:
 ## 8. Numeric Rules
 
 - every conversion or derivation must use `scripts/safe_calc.py`
-- keep numbers unit-free
+- store published JSON numbers in canonical `MPa / mm / kN / %` units
 - round to `0.001`
-- never guess missing `L`
+- keep the `fcy150` key present; it may stay `null` when project-level strength normalization is deferred
+- `boundary_condition` may be `unknown` or `null` when the paper does not define it defensibly
+- `L` means project geometric specimen length, not effective length
 - keep eccentricity signs as source evidence shows them
 - do not use the sign pattern of `e1` and `e2` alone to exclude a specimen from the ordinary dataset
 - recycled concrete rows must preserve `R%` in `r_ratio`
-- when the paper does not define `L`, use steel-tube net height basis and record the derivation
+- when the paper does not define `L`, use steel-tube net height only when the figure evidence makes that geometry explicit, and record the derivation
+- never infer `L` from boundary-condition assumptions or effective-length formulas
 
 ## 9. Evidence Rules
 
@@ -140,6 +152,8 @@ Every specimen row must preserve:
 - `evidence.table_image`
 - `evidence.setup_image`
 - `evidence.value_origin`
+
+When a stored value is converted to canonical units, keep the original raw unit/value trace in `evidence.value_origin` and preserve `quality_flags` such as `unit_converted`.
 
 When a value is derived, the field-level evidence must record:
 
@@ -158,6 +172,7 @@ Validation must reject:
 - `is_valid=false` with non-empty specimen groups
 - axial rows with nonzero eccentricity
 - eccentric rows with both eccentricities zero
+- non-null `fcy150` values that are non-numeric or non-positive
 - ordinary rows with shapes outside circular / square / rectangular / round-ended
 - ordinary rows with non-carbon steel
 - ordinary rows with concrete types outside normal / high-strength / recycled
@@ -170,4 +185,4 @@ The single-paper JSON should be:
 - traceable
 - physically plausible
 - ordinary-filter aware
-- ready for unified flat export across section types
+- canonical for downstream project-specific processing
