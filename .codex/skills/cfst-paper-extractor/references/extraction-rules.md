@@ -1,4 +1,4 @@
-# CFST Extraction Rules V2
+# CFST Extraction Rules V2.1
 
 Use this file as the extraction source of truth for one paper.
 
@@ -22,55 +22,64 @@ A paper is `is_valid=true` only when all are true:
 
 ## 2. Ordinary-CFST Gate
 
-The v2 schema separates:
+The ordinary gate uses a two-tier, specimen-level evaluation model. Each specimen is individually tagged `is_ordinary=true` or `is_ordinary=false`. The paper-level `is_ordinary_cfst` is derived: `true` when the paper contains at least one ordinary specimen, `false` otherwise.
 
-- `is_valid`
-- `is_ordinary_cfst`
-- `ordinary_filter.include_in_dataset`
+### 2.1 Tier 1 — Paper-Level Preconditions
 
-The ordinary decision is intentionally paper-level in v2. Use it as a clean-paper gate: if any specimen set in a valid paper falls outside the ordinary scope, keep the whole paper `is_ordinary_cfst=false` and `ordinary_filter.include_in_dataset=false`.
+These conditions apply to all specimens in the paper. If any fails, every specimen in the paper gets `is_ordinary=false` with the paper-level reason propagated to each specimen's `ordinary_exclusion_reasons`.
 
-### 2.1 Include As Ordinary CFST
+Tier 1 requires all of:
 
-Set `is_ordinary_cfst=true` only when the specimen set stays within the following scope:
+- `test_temperature = ambient`
+- `loading_regime = static`
+- no paper-wide durability conditioning (fire exposure, corrosion, freeze-thaw)
 
-- section shape is one of: circular, square, rectangular, round-ended
-- steel tube is conventional carbon steel
-- test is at ambient temperature
-- loading is static and monotonic
-- compression mode is axial or single-direction eccentric compression
+If Tier 1 fails, skip Tier 2 and set all specimens to `is_ordinary=false`.
+
+### 2.2 Tier 2 — Per-Specimen Evaluation
+
+When Tier 1 passes, evaluate each specimen individually. A specimen is `is_ordinary=true` only when all hold:
+
+- `section_shape` is one of: circular, square, rectangular, round-ended
+- `steel_type = carbon_steel`
+- `concrete_type` is one of: normal, high-strength, recycled
+- `loading_pattern = monotonic`
+- compression mode is axial or single-direction eccentric
 - no strengthening, no added confinement device, no stiffener that changes the basic member system
-- no durability-conditioned or special-environment test history
-- concrete may be:
-  - normal concrete
-  - high-strength concrete
-  - recycled aggregate concrete, with explicit recycled aggregate replacement ratio `R%`
+- recycled aggregate concrete has explicit `R%` recorded in `r_ratio`
 
-Typical ordinary cases:
+Typical ordinary specimens:
 
-- normal concrete
-- high-strength concrete
-- recycled aggregate concrete with explicit `R%`
-- carbon-steel tube
-- ambient-temperature static monotonic compression tests
-- axial compression
-- single-direction eccentric compression
+- normal or high-strength concrete with carbon-steel tube
+- recycled aggregate concrete with explicit `R%` and carbon-steel tube
+- static monotonic axial or single-direction eccentric compression
 
-### 2.2 Exclude Or Tag As Special
+### 2.3 Specimen Exclusion Tagging
 
-Set `is_ordinary_cfst=false` and record `ordinary_filter.special_factors` / `ordinary_filter.exclusion_reasons` when any of these dominates the specimen design:
+When a specimen fails Tier 2, set `is_ordinary=false` and record each failing condition in `ordinary_exclusion_reasons`. Common reasons:
 
-- stainless steel tube
-- lightweight aggregate concrete
-- self-consolidating concrete
-- UHPC / RPC / ultra-high-strength concrete
-- fire exposure / corrosion / freeze-thaw / durability-conditioned specimens
-- external or internal stiffeners, spirals, CFRP, additional confinement devices
-- preload, prestress, impact, cyclic loading, or other nonstandard loading history
-- nonstandard section families outside circular / square / rectangular / round-ended
-- beam-column, joint, or frame tests without recoverable column-level specimen data
+- `stainless_steel`
+- `lightweight_concrete`
+- `self_consolidating_concrete`
+- `uhpc`
+- `cyclic_loading`
+- `repeated_loading`
+- `non_ordinary_shape`
+- `confinement_device`
+- `strengthened_section`
 
-If the paper is valid but non-ordinary, keep `is_valid=true`, `is_ordinary_cfst=false`, and `ordinary_filter.include_in_dataset=false`.
+A paper with mixed ordinary and non-ordinary specimens keeps all specimens in the output. Ordinary specimens get `is_ordinary=true`; non-ordinary specimens get `is_ordinary=false` with reasons.
+
+### 2.4 Paper-Level Derivation
+
+After all specimens are tagged:
+
+- `is_ordinary_cfst = any(specimen.is_ordinary for specimen in all_specimens)`
+- `ordinary_filter.include_in_dataset = is_ordinary_cfst`
+- `ordinary_filter.ordinary_count` = count of specimens with `is_ordinary=true`
+- `ordinary_filter.total_count` = total specimen count
+- `ordinary_filter.special_factors`: list of paper-level special tags
+- `ordinary_filter.exclusion_reasons`: list of paper-level exclusion summaries
 
 ## 3. Top-Level JSON Shape
 
@@ -90,7 +99,7 @@ Required top-level keys:
 
 Recommended `schema_version` value:
 
-- `cfst-paper-extractor-v2`
+- `cfst-paper-extractor-v2.1`
 
 Published `output/<paper_id>.json` files are the canonical dataset artifact. Any downstream tabular conversion is project-specific and outside this skill's canonical schema.
 
@@ -116,7 +125,9 @@ Unlike v1, `Group_A.r0` is not forced to zero. Keep a nonzero corner radius when
 
 Required keys:
 
-- `include_in_dataset`: boolean
+- `include_in_dataset`: boolean (true when at least one specimen is ordinary)
+- `ordinary_count`: integer (count of specimens with `is_ordinary=true`)
+- `total_count`: integer (total specimen count across all groups)
 - `special_factors`: list of strings
 - `exclusion_reasons`: list of strings
 
@@ -169,11 +180,12 @@ Required keys:
 - `impact`
 - `unknown`
 
-`loading_pattern` allowed values:
+`loading_pattern` allowed values (paper level):
 
 - `monotonic`
 - `cyclic`
 - `repeated`
+- `mixed`
 - `unknown`
 
 `setup_figure` keys:
@@ -192,6 +204,7 @@ Every specimen row in `Group_A`, `Group_B`, or `Group_C` must contain:
 - `specimen_label`
 - `section_shape`
 - `loading_mode`
+- `loading_pattern`
 - `boundary_condition`
 - `fc_value`
 - `fc_type`
@@ -201,6 +214,8 @@ Every specimen row in `Group_A`, `Group_B`, or `Group_C` must contain:
 - `r_ratio`
 - `steel_type`
 - `concrete_type`
+- `is_ordinary`
+- `ordinary_exclusion_reasons`
 - `b`
 - `h`
 - `t`
@@ -228,6 +243,13 @@ Every specimen row in `Group_A`, `Group_B`, or `Group_C` must contain:
 
 - `axial`
 - `eccentric`
+
+`loading_pattern` (specimen level):
+
+- `monotonic`
+- `cyclic`
+- `repeated`
+- `unknown`
 
 `fc_basis`:
 
@@ -260,8 +282,10 @@ Every specimen row in `Group_A`, `Group_B`, or `Group_C` must contain:
 - `specimen_label`: unique, non-empty specimen ID
 - `boundary_condition`: trace metadata for the specimen support/end condition; may be `null` or `unknown`
 - `fc_value`: source concrete strength value in MPa
-- `fc_type`: source concrete specimen description, for example `Cube 150` or `Cylinder 100x200`
-- `fc_basis`: basis category of `fc_value`
+- `fc_type`: source concrete specimen description, for example `Cube 150`, `Cylinder 100x200`, or `Prism 150x150x300`
+- `fc_basis`: basis category of `fc_value`; use `prism` for prism / axial-compression concrete-strength systems, not for CFST member loading mode
+
+`fc_value` and `fc_type` must describe the same source measurement. If the paper reports a strength of 45.0 MPa measured on a 100 mm cube, store `fc_type = "Cube 100"` and `fc_value = 45.0`. If the paper has already converted that value to a 150 mm standard cube equivalent and states 42.75 MPa, store `fc_type = "Cube 150"` and `fc_value = 42.75`. Never pair an `fc_value` from one specimen basis with an `fc_type` from another.
 - `fy`: steel yield strength in MPa
 - `fcy150`: normalized 150 mm cylinder compressive strength in MPa; keep the key present, but `null` is allowed during extraction when project-level conversion is deferred
 - `r_ratio`: recycled aggregate ratio in percent, use `0` for normal concrete
@@ -269,9 +293,63 @@ Every specimen row in `Group_A`, `Group_B`, or `Group_C` must contain:
 - `L`: project geometric specimen length in mm; do not reinterpret it as effective length
 - `n_exp`: experimental ultimate load in kN
 - `source_evidence`: concise human-readable trace string
-- `quality_flags`: list of extraction-risk flags such as `ocr_recovered`, `derived_L`, `unit_converted`
+- `loading_pattern`: the loading pattern for this specific specimen (`monotonic`, `cyclic`, `repeated`, or `unknown`); when the paper uses a single loading pattern for all specimens, every specimen receives the same value; when the paper mixes patterns, each specimen records its own
+- `is_ordinary`: boolean indicating whether this specimen qualifies for the ordinary CFST dataset; derived from the two-tier evaluation in §2
+- `ordinary_exclusion_reasons`: list of strings identifying why the specimen is non-ordinary; must be empty when `is_ordinary=true`; must be non-empty when `is_ordinary=false`
+- `quality_flags`: list of extraction-risk flags such as `ocr_recovered`, `derived_L`, `unit_converted`, `context_inferred_fc_basis`
 
 For recycled aggregate concrete, `r_ratio` must record the recycled aggregate replacement ratio `R%`.
+
+### 6.2.1 Concrete-Strength Basis Resolution
+
+Resolve `fc_basis` using the following priority order:
+
+1. explicit statements in `Materials`, `Specimens`, `Concrete properties`, notation sections, specimen tables, and table footnotes
+2. explicit specimen/test descriptions such as `150 mm cube`, `100x200 cylinder`, `ASTM C39 cylinder`, `JIS A 1108`, `JIS A 1132`, or prism / axial-compression concrete-strength wording
+3. cited design-code or test-standard context
+4. shorthand strength symbols such as `C60`, `C60/75`, `f'c`, `Fc`, `fck`, `fc`
+
+Apply these rules:
+
+- if the source explicitly says `cube`, `150 mm cube`, or equivalent standard cube wording, use `fc_basis = cube`
+- if the source explicitly says `cylinder`, gives cylinder dimensions, or cites cylinder-based test standards, use `fc_basis = cylinder`
+- if the source explicitly says prism strength, axial compressive strength, or uses the Chinese GB/T 50010 `fck` / `fc` axial-compression system, use `fc_basis = prism`
+- treat explicit material/test descriptions as higher priority than shorthand grades in titles, abstracts, or specimen labels
+- when both cube and cylinder strengths are reported, store the basis/value that the paper explicitly uses in material parameters, constitutive calculations, or specimen-property tables; cite that decision in `source_evidence`
+
+Country/context rules:
+
+- China / GB/T 50010 context:
+  - bare `C60`, `C70`, and similar `C` grades usually mean concrete strength grades defined by the 150 mm standard cube-strength system
+  - `fck` and `fc` are axial/prism-system values in this context, not cylinder strengths
+- Europe / EN 206 / Eurocode context:
+  - `Cx/y` means `x = characteristic cylinder strength`, `y = cube strength`
+  - a bare single-value `C60` in a European paper is shorthand and remains ambiguous until the paper confirms which basis is being used
+  - `fck` in Eurocode is the characteristic cylinder compressive strength; when a European paper writes `fck = 60 MPa` without a `Cx/y` grade, treat it as `fc_basis = cylinder`
+- United States / ACI / ASTM C39 context:
+  - `f'c` is cylinder-based specified compressive strength
+  - a bare `C60` is not enough by itself to justify `cube` or `cylinder`
+- Japan / `Fc` / JIS A 1108 / JIS A 1132 context:
+  - `Fc` is normally tied to the Japanese cylinder-based concrete-strength system
+  - a bare `C60` is not enough by itself to justify `cube` or `cylinder`
+
+Cross-code symbol disambiguation:
+
+The same symbol can carry completely different meanings across national codes. Do not interpret a symbol by its letters alone; always check which code system the paper is operating in.
+
+- China `fck` is NOT Eurocode `fck`. In GB/T 50010, `fck` is the characteristic axial/prism compressive strength converted from the cube grade (e.g., C60 → fck = 38.5 MPa). In Eurocode, `fck` is the characteristic cylinder compressive strength (e.g., C60/75 → fck = 60 MPa).
+- China `fc` is NOT US `f'c`. In GB/T 50010, `fc` is the axial compressive design value (lower than fck). In ACI, `f'c` is the specified compressive strength defaulting to cylinder tests.
+- Japan `Fc` is a separate notation. It is the Japanese design standard strength tied to cylinder-based JIS testing, not interchangeable with Chinese `fc` or US `f'c`.
+
+When a paper cites multiple national codes or compares specimens across code systems, resolve each specimen's `fc_basis` against the code that governs that specific specimen, not against a single assumed code for the whole paper.
+
+Ambiguity rules:
+
+- do not infer `cube` from a bare `C60`-style notation unless the paper is clearly operating in a Chinese GB/T 50010-type context or explicitly says cube
+- do not infer `cylinder` from a bare `C60`-style notation unless the paper explicitly ties that notation to cylinder-based testing or code context
+- if the basis remains unresolved after checking the paper text, cited standards, and table notes, set `fc_basis = unknown`
+- when `fc_basis = unknown`, keep `fcy150 = null` unless the paper itself provides a defensible normalized cylinder value
+- for context-inferred decisions, make `source_evidence` cite the specific section/table/note and the standard or notation that justified the choice
 
 ### 6.3 Canonical Units
 
@@ -347,14 +425,17 @@ Example:
 - `t` must be strictly smaller than `min(b, h) / 2`
 - keep `fcy150 = null` when the project defers strength-basis conversion; do not fabricate it during extraction
 
-Ordinary-CFST inclusion requires all specimen rows to stay within:
+A specimen with `is_ordinary=true` must satisfy all of:
 
 - `section_shape in {square, rectangular, circular, round-ended}`
 - `steel_type = carbon_steel`
 - `concrete_type in {normal, high_strength, recycled}`
+- `loading_pattern = monotonic`
+
+Paper-level Tier 1 preconditions (checked once, applied to all specimens):
+
 - `test_temperature = ambient`
 - `loading_regime = static`
-- `loading_pattern = monotonic`
 
 ## 10. Length Rule
 

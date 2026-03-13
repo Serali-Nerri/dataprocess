@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate one CFST extraction JSON against schema v2 rules."""
+"""Validate one CFST extraction JSON against schema v2.1 rules."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ SPECIMEN_KEYS = {
     "specimen_label",
     "section_shape",
     "loading_mode",
+    "loading_pattern",
     "boundary_condition",
     "fc_value",
     "fc_type",
@@ -40,6 +41,8 @@ SPECIMEN_KEYS = {
     "r_ratio",
     "steel_type",
     "concrete_type",
+    "is_ordinary",
+    "ordinary_exclusion_reasons",
     "b",
     "h",
     "t",
@@ -68,7 +71,8 @@ PAPER_LOADING_MODES = {"axial", "eccentric", "mixed", "unknown"}
 ROW_LOADING_MODES = {"axial", "eccentric"}
 TEST_TEMPERATURES = {"ambient", "elevated", "post_fire", "unknown"}
 LOADING_REGIMES = {"static", "dynamic", "impact", "unknown"}
-LOADING_PATTERNS = {"monotonic", "cyclic", "repeated", "unknown"}
+LOADING_PATTERNS = {"monotonic", "cyclic", "repeated", "mixed", "unknown"}
+ROW_LOADING_PATTERNS = {"monotonic", "cyclic", "repeated", "unknown"}
 FC_BASIS_ALLOWED = {"cube", "cylinder", "prism", "unknown"}
 STEEL_TYPES = {"carbon_steel", "stainless_steel", "other", "unknown"}
 CONCRETE_TYPES = {
@@ -156,6 +160,17 @@ def _is_valid_fc_type(value: str) -> bool:
     return FC_TYPE_SIZED_PATTERN.fullmatch(text) is not None
 
 
+def _fc_type_implied_basis(fc_type_str: str) -> str | None:
+    """Return the basis implied by fc_type, or None if ambiguous/unknown."""
+    lowered = fc_type_str.strip().lower()
+    if not lowered or lowered == "unknown":
+        return None
+    for basis in ("cube", "cylinder", "prism"):
+        if lowered.startswith(basis):
+            return basis
+    return None
+
+
 def _validate_ref_info(obj: Any, errors: list[str]) -> None:
     if not isinstance(obj, dict):
         errors.append("`ref_info` must be an object.")
@@ -197,13 +212,28 @@ def _validate_ordinary_filter(
         errors.append("`ordinary_filter` must be an object.")
         return
 
-    for key in ("include_in_dataset", "special_factors", "exclusion_reasons"):
+    for key in ("include_in_dataset", "ordinary_count", "total_count", "special_factors", "exclusion_reasons"):
         if key not in obj:
             errors.append(f"`ordinary_filter.{key}` is required.")
 
     include = obj.get("include_in_dataset")
     if include is not None and not isinstance(include, bool):
         errors.append("`ordinary_filter.include_in_dataset` must be boolean.")
+
+    ordinary_count = obj.get("ordinary_count")
+    if ordinary_count is not None and not isinstance(ordinary_count, int):
+        errors.append("`ordinary_filter.ordinary_count` must be integer.")
+    total_count = obj.get("total_count")
+    if total_count is not None and not isinstance(total_count, int):
+        errors.append("`ordinary_filter.total_count` must be integer.")
+
+    if isinstance(ordinary_count, int) and isinstance(total_count, int):
+        if ordinary_count < 0:
+            errors.append("`ordinary_filter.ordinary_count` must be >= 0.")
+        if total_count < 0:
+            errors.append("`ordinary_filter.total_count` must be >= 0.")
+        if ordinary_count > total_count:
+            errors.append("`ordinary_filter.ordinary_count` cannot exceed `total_count`.")
 
     if "special_factors" in obj:
         _validate_string_list(obj["special_factors"], "ordinary_filter.special_factors", errors)
@@ -367,8 +397,26 @@ def _validate_specimen(
         elif mode not in ROW_LOADING_MODES:
             errors.append(f"`{tag}.loading_mode` invalid: {mode}")
 
+    if "loading_pattern" in specimen:
+        lp = specimen["loading_pattern"]
+        if not isinstance(lp, str):
+            errors.append(f"`{tag}.loading_pattern` must be string.")
+        elif lp not in ROW_LOADING_PATTERNS:
+            errors.append(f"`{tag}.loading_pattern` invalid: {lp}")
+
     if "boundary_condition" in specimen and specimen["boundary_condition"] is not None and not isinstance(specimen["boundary_condition"], str):
         errors.append(f"`{tag}.boundary_condition` must be string or null.")
+
+    if "is_ordinary" in specimen and not isinstance(specimen["is_ordinary"], bool):
+        errors.append(f"`{tag}.is_ordinary` must be boolean.")
+    if "ordinary_exclusion_reasons" in specimen:
+        _validate_string_list(specimen["ordinary_exclusion_reasons"], f"{tag}.ordinary_exclusion_reasons", errors)
+        is_ord = specimen.get("is_ordinary")
+        reasons = specimen["ordinary_exclusion_reasons"]
+        if is_ord is True and isinstance(reasons, list) and len(reasons) > 0:
+            errors.append(f"`{tag}.is_ordinary=true` must have empty `ordinary_exclusion_reasons`.")
+        if is_ord is False and isinstance(reasons, list) and len(reasons) == 0:
+            errors.append(f"`{tag}.is_ordinary=false` must have non-empty `ordinary_exclusion_reasons`.")
 
     if "fc_type" in specimen:
         if not isinstance(specimen["fc_type"], str):
@@ -393,6 +441,16 @@ def _validate_specimen(
             errors.append(f"`{tag}.fc_basis` must be string.")
         elif specimen["fc_basis"] not in FC_BASIS_ALLOWED:
             errors.append(f"`{tag}.fc_basis` invalid: {specimen['fc_basis']}")
+
+    if "fc_type" in specimen and "fc_basis" in specimen:
+        fc_type_str = specimen["fc_type"] if isinstance(specimen["fc_type"], str) else ""
+        fc_basis_str = specimen["fc_basis"] if isinstance(specimen["fc_basis"], str) else ""
+        implied = _fc_type_implied_basis(fc_type_str)
+        if implied is not None and fc_basis_str != "unknown" and implied != fc_basis_str:
+            errors.append(
+                f"`{tag}.fc_type` '{specimen['fc_type']}' implies basis '{implied}' "
+                f"but `fc_basis` is '{fc_basis_str}'. These must be consistent."
+            )
 
     for key, allowed in (("steel_type", STEEL_TYPES), ("concrete_type", CONCRETE_TYPES)):
         if key in specimen:
@@ -472,53 +530,90 @@ def _iter_specimens(payload: dict[str, Any]):
                     yield group_name, idx, specimen
 
 
-def _validate_ordinary_scope(payload: dict[str, Any], errors: list[str], warnings: list[str]) -> None:
-    if payload.get("is_ordinary_cfst") is not True:
+def _validate_specimen_ordinary(
+    tag: str, specimen: dict[str, Any], tier1_pass: bool, errors: list[str], warnings: list[str]
+) -> None:
+    """Validate per-specimen ordinary flag consistency."""
+    is_ord = specimen.get("is_ordinary")
+    if not isinstance(is_ord, bool):
         return
 
+    if not tier1_pass and is_ord is True:
+        errors.append(
+            f"`{tag}.is_ordinary=true` but paper-level Tier 1 preconditions failed."
+        )
+
+    if is_ord is True:
+        shape = specimen.get("section_shape")
+        if shape not in ORDINARY_ALLOWED_SHAPES:
+            errors.append(f"`{tag}.is_ordinary=true` but section_shape '{shape}' not allowed.")
+        if specimen.get("steel_type") != "carbon_steel":
+            errors.append(f"`{tag}.is_ordinary=true` but steel_type is not carbon_steel.")
+        concrete_type = specimen.get("concrete_type")
+        if concrete_type not in ORDINARY_ALLOWED_CONCRETE_TYPES:
+            errors.append(f"`{tag}.is_ordinary=true` but concrete_type '{concrete_type}' not allowed.")
+        if specimen.get("loading_pattern") != "monotonic":
+            errors.append(f"`{tag}.is_ordinary=true` but loading_pattern is not monotonic.")
+        r_ratio = specimen.get("r_ratio")
+        if concrete_type == "recycled":
+            if not _is_number(r_ratio) or (isinstance(r_ratio, (int, float)) and r_ratio <= 0):
+                errors.append(f"`{tag}.is_ordinary=true` recycled concrete must have r_ratio > 0.")
+
+    r_ratio = specimen.get("r_ratio")
+    concrete_type = specimen.get("concrete_type")
+    if concrete_type != "recycled" and _is_number(r_ratio) and isinstance(r_ratio, (int, float)) and r_ratio > 0:
+        warnings.append(
+            f"`{tag}.r_ratio` > 0 but `concrete_type` is {concrete_type}; "
+            "use `recycled` when recycled aggregate is the primary type."
+        )
+
+
+def _validate_ordinary_scope(payload: dict[str, Any], errors: list[str], warnings: list[str]) -> None:
+    """Two-tier specimen-level ordinary validation."""
     paper_level = payload.get("paper_level")
     if not isinstance(paper_level, dict):
         return
 
+    # Tier 1: paper-level preconditions
+    tier1_pass = True
     if paper_level.get("test_temperature") != "ambient":
-        errors.append("Ordinary CFST paper must have `paper_level.test_temperature=ambient`.")
+        tier1_pass = False
     if paper_level.get("loading_regime") != "static":
-        errors.append("Ordinary CFST paper must have `paper_level.loading_regime=static`.")
-    if paper_level.get("loading_pattern") != "monotonic":
-        errors.append("Ordinary CFST paper must have `paper_level.loading_pattern=monotonic`.")
+        tier1_pass = False
 
-    ordinary_filter = payload.get("ordinary_filter")
-    if isinstance(ordinary_filter, dict):
-        for factor in ordinary_filter.get("special_factors", []):
-            if factor not in ORDINARY_ALLOWED_SPECIAL_FACTORS:
-                errors.append(
-                    "Ordinary CFST paper contains disallowed special factor: "
-                    f"{factor}"
-                )
-
+    # Per-specimen ordinary checks
+    actual_ordinary_count = 0
+    total_count = 0
     for group_name, idx, specimen in _iter_specimens(payload):
         tag = f"{group_name}[{idx}]"
-        shape = specimen.get("section_shape")
-        if shape not in ORDINARY_ALLOWED_SHAPES:
-            errors.append(
-                f"`{tag}.section_shape` not allowed for ordinary CFST: {shape}"
-            )
-        if specimen.get("steel_type") != "carbon_steel":
-            errors.append(f"`{tag}.steel_type` must be carbon_steel for ordinary CFST.")
-        concrete_type = specimen.get("concrete_type")
-        if concrete_type not in ORDINARY_ALLOWED_CONCRETE_TYPES:
-            errors.append(
-                f"`{tag}.concrete_type` not allowed for ordinary CFST: {concrete_type}"
-            )
+        total_count += 1
+        _validate_specimen_ordinary(tag, specimen, tier1_pass, errors, warnings)
+        if specimen.get("is_ordinary") is True:
+            actual_ordinary_count += 1
 
-        r_ratio = specimen.get("r_ratio")
-        if concrete_type == "recycled":
-            if not _is_number(r_ratio) or r_ratio <= 0:
-                errors.append(f"`{tag}.r_ratio` must be > 0 for recycled concrete.")
-        elif _is_number(r_ratio) and r_ratio > 0:
-            warnings.append(
-                f"`{tag}.r_ratio` > 0 but `concrete_type` is {concrete_type}; "
-                "use `recycled` when recycled aggregate is the primary type."
+    # Cross-check is_ordinary_cfst against specimen flags
+    has_ordinary = actual_ordinary_count > 0
+    is_ordinary_cfst = payload.get("is_ordinary_cfst")
+    if isinstance(is_ordinary_cfst, bool):
+        if is_ordinary_cfst and not has_ordinary:
+            errors.append("`is_ordinary_cfst=true` but no specimen has `is_ordinary=true`.")
+        if not is_ordinary_cfst and has_ordinary:
+            errors.append("`is_ordinary_cfst=false` but some specimens have `is_ordinary=true`.")
+
+    # Cross-check ordinary_filter counts
+    ordinary_filter = payload.get("ordinary_filter")
+    if isinstance(ordinary_filter, dict):
+        of_count = ordinary_filter.get("ordinary_count")
+        if isinstance(of_count, int) and of_count != actual_ordinary_count:
+            errors.append(
+                f"`ordinary_filter.ordinary_count` is {of_count} but actual count "
+                f"of `is_ordinary=true` specimens is {actual_ordinary_count}."
+            )
+        of_total = ordinary_filter.get("total_count")
+        if isinstance(of_total, int) and of_total != total_count:
+            errors.append(
+                f"`ordinary_filter.total_count` is {of_total} but actual specimen "
+                f"count is {total_count}."
             )
 
 
@@ -610,24 +705,13 @@ def validate_payload(
     if payload.get("is_valid") is False and payload.get("is_ordinary_cfst") is True:
         errors.append("Invalid paper cannot be marked as ordinary CFST.")
 
-    ordinary_filter = payload.get("ordinary_filter")
-    if isinstance(ordinary_filter, dict):
-        include = ordinary_filter.get("include_in_dataset")
-        if payload.get("is_ordinary_cfst") is True and include is not True:
-            errors.append("Ordinary CFST paper must have `ordinary_filter.include_in_dataset=true`.")
-        if payload.get("is_ordinary_cfst") is False and include is True:
-            errors.append("Non-ordinary paper cannot have `ordinary_filter.include_in_dataset=true`.")
-        exclusion_reasons = ordinary_filter.get("exclusion_reasons")
-        if payload.get("is_ordinary_cfst") is True and isinstance(exclusion_reasons, list) and exclusion_reasons:
-            errors.append("Ordinary CFST paper cannot contain exclusion reasons.")
-
     _validate_ordinary_scope(payload, errors, warnings)
 
     return errors, warnings, total
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate single-paper CFST extraction JSON v2.")
+    parser = argparse.ArgumentParser(description="Validate single-paper CFST extraction JSON v2.1.")
     parser.add_argument("--json-path", required=True, help="Path to extraction JSON file.")
     parser.add_argument(
         "--expect-valid",

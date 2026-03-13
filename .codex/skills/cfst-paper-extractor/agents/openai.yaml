@@ -1,4 +1,4 @@
 interface:
   display_name: "CFST Paper Extractor"
   short_description: "Extract, validate, and publish CFST paper JSON"
-  default_prompt: "Use $cfst-paper-extractor to prepare MinerU CFST folders, run isolated one-paper extraction, validate schema-v2 outputs, and publish canonical JSON outputs."
+  default_prompt: "Use $cfst-paper-extractor to prepare MinerU CFST folders, run isolated one-paper extraction, apply the skill's country/context-sensitive concrete-strength basis rules, validate schema-v2 outputs, and publish canonical JSON outputs."

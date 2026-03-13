@@ -77,6 +77,7 @@ python .codex/skills/cfst-paper-extractor/scripts/checkpoint_output_commits.py \
 - Process exactly one normalized paper folder.
 - Require these inputs: `<paper_token>.md`, `<paper_token>_content_list_v2.json`, `images/`, and `table/`.
 - Read the markdown first for context, then use setup images and table images as evidence when the references require them.
+- Resolve `fc_basis` by following `references/extraction-rules.md` §6.2.1 (Concrete-Strength Basis Resolution). That section defines the priority order, country/context rules, cross-code symbol disambiguation, and ambiguity fallback. Do not assign `fc_basis` without consulting those rules.
 - Use `scripts/safe_calc.py` for conversions, rounding, and derived values; do not do ad hoc arithmetic.
 - Preserve eccentricity signs exactly as source evidence shows them.
 - Do not exclude ordinary CFST specimens from the dataset based on the sign pattern of `e1` and `e2` alone.
@@ -84,11 +85,11 @@ python .codex/skills/cfst-paper-extractor/scripts/checkpoint_output_commits.py \
 
 ### Output shape
 
-- Produce the schema-v2 top-level keys `schema_version`, `paper_id`, `is_valid`, `is_ordinary_cfst`, `reason`, `ordinary_filter`, `ref_info`, `paper_level`, `Group_A`, `Group_B`, and `Group_C`.
-- Use the 3-state policy for invalid, valid-non-ordinary, and valid-ordinary papers.
-- Treat `is_valid=false` as an unusable paper.
-- Treat `is_valid=true` and `is_ordinary_cfst=false` as usable but excluded from the ordinary dataset.
-- Treat `is_valid=true` and `is_ordinary_cfst=true` as included in the ordinary dataset.
+- Produce the schema-v2.1 top-level keys `schema_version`, `paper_id`, `is_valid`, `is_ordinary_cfst`, `reason`, `ordinary_filter`, `ref_info`, `paper_level`, `Group_A`, `Group_B`, and `Group_C`.
+- Treat `is_valid=false` as an unusable paper with empty specimen groups.
+- Treat `is_valid=true` as usable; extract all specimens regardless of ordinary status.
+- Tag each specimen with `is_ordinary` and `ordinary_exclusion_reasons` using the two-tier evaluation in `references/extraction-rules.md` §2.
+- Derive `is_ordinary_cfst` from specimen flags: `true` when at least one specimen has `is_ordinary=true`.
 - Keep worker output in `tmp/<paper_id>/<paper_id>.json` only.
 - Let the parent publish the final JSON into `output/<paper_id>.json`; workers must never write final outputs directly.
 - Treat published JSON as canonical. Any project-specific tabular conversion should happen outside this skill.
