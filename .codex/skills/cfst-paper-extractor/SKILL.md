@@ -65,6 +65,7 @@ python .codex/skills/cfst-paper-extractor/scripts/checkpoint_output_commits.py \
 ### Batch orchestration
 
 - Use a parent-child model for every multi-paper extraction.
+- Regardless of paper count, extraction work must always be executed by a spawned worker sub-agent; even a single-paper extraction must not be performed directly by the parent agent.
 - Spawn one worker sub-agent per normalized paper folder.
 - Cap concurrency at 5 active paper workers.
 - Declare worker ownership at launch: one paper folder, one worker-local temp JSON path, and one worker worktree path.
