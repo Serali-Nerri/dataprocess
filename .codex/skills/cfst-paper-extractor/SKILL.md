@@ -78,7 +78,7 @@ python .codex/skills/cfst-paper-extractor/scripts/checkpoint_output_commits.py \
 - Process exactly one normalized paper folder.
 - Require these inputs: `<paper_token>.md`, `<paper_token>_content_list_v2.json`, `images/`, and `table/`.
 - Read the markdown first for context, then use setup images and table images as evidence when the references require them.
-- Resolve `fc_basis` by following `references/extraction-rules.md` §6.2.1 (Concrete-Strength Basis Resolution). That section defines the priority order, country/context rules, cross-code symbol disambiguation, and ambiguity fallback. Do not assign `fc_basis` without consulting those rules.
+- Resolve `fc_basis` by following `references/extraction-rules.md` §6.2.1 (Concrete-Strength Basis Resolution). Before interpreting symbols such as `fck`, `fc`, `f'c`, or `Fc`, first search nearby material/property text, table headers, and footnotes for concrete-strength-grade signals such as `C30`, `C40`, `C50`, `C60`, or `C60/75`. That section defines the priority order, country/context rules, cross-code symbol disambiguation, and ambiguity fallback. Do not assign `fc_basis` without consulting those rules.
 - Use `scripts/safe_calc.py` for conversions, rounding, and derived values; do not do ad hoc arithmetic.
 - Preserve eccentricity signs exactly as source evidence shows them.
 - Do not exclude ordinary CFST specimens from the dataset based on the sign pattern of `e1` and `e2` alone.

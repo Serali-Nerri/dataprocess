@@ -311,10 +311,12 @@ Resolve `fc_basis` using the following priority order:
 
 Apply these rules:
 
+- before relying on symbols such as `fck`, `fc`, `f'c`, or `Fc`, first search the same sentence, paragraph, table header, and table footnote for nearby concrete-strength-grade signals such as `C30`, `C40`, `C50`, `C60`, or `C60/75`
 - if the source explicitly says `cube`, `150 mm cube`, or equivalent standard cube wording, use `fc_basis = cube`
 - if the source explicitly says `cylinder`, gives cylinder dimensions, or cites cylinder-based test standards, use `fc_basis = cylinder`
 - if the source explicitly says prism strength, axial compressive strength, or uses the Chinese GB/T 50010 `fck` / `fc` axial-compression system, use `fc_basis = prism`
 - treat explicit material/test descriptions as higher priority than shorthand grades in titles, abstracts, or specimen labels
+- in Chinese GB/T 50010-type context, a nearby single-grade `C30` / `C40` / `C50`-style signal is a strong local cue for the cube-strength system and must be checked before a nearby bare `fck` / `fc` symbol is allowed to lock `fc_basis = prism`
 - when both cube and cylinder strengths are reported, store the basis/value that the paper explicitly uses in material parameters, constitutive calculations, or specimen-property tables; cite that decision in `source_evidence`
 
 Country/context rules:
@@ -347,6 +349,7 @@ Ambiguity rules:
 
 - do not infer `cube` from a bare `C60`-style notation unless the paper is clearly operating in a Chinese GB/T 50010-type context or explicitly says cube
 - do not infer `cylinder` from a bare `C60`-style notation unless the paper explicitly ties that notation to cylinder-based testing or code context
+- if a nearby `Cxx` grade signal and a nearby `fck` / `fc` symbol point to different bases, and no explicit cube / cylinder / prism test description resolves the conflict, do not force the symbol-based basis; set `fc_basis = unknown`
 - if the basis remains unresolved after checking the paper text, cited standards, and table notes, set `fc_basis = unknown`
 - when `fc_basis = unknown`, keep `fcy150 = null` unless the paper itself provides a defensible normalized cylinder value
 - for context-inferred decisions, make `source_evidence` cite the specific section/table/note and the standard or notation that justified the choice

@@ -36,7 +36,7 @@ If any required path is missing, fail fast and report the missing path.
 1. Read `references/extraction-rules.md`.
 2. Verify required input files exist.
 3. Read markdown first for global context.
-4. Resolve concrete-strength basis evidence from `Materials`, `Specimens`, `Concrete properties`, notation sections, and table footnotes before assigning `fc_basis`.
+4. Resolve concrete-strength basis evidence from `Materials`, `Specimens`, `Concrete properties`, notation sections, and table footnotes before assigning `fc_basis`. First search for nearby concrete-strength-grade signals such as `C30`, `C40`, `C50`, `C60`, or `C60/75`, then interpret symbols such as `fck`, `fc`, `f'c`, or `Fc`.
 5. Run the validity gate.
 6. Run the ordinary-CFST Tier 1 paper-level preconditions.
 7. Resolve the setup figure from markdown-linked image evidence.
@@ -141,11 +141,13 @@ Then:
 ## 8. Concrete-Strength Basis Rules
 
 - treat explicit material/property evidence as first priority: `Materials`, `Specimens`, `Concrete properties`, notation sections, table headers, and table footnotes outrank shorthand labels such as `C60`
+- before interpreting notation symbols, search nearby material/property text, the same sentence or paragraph, table headers, and footnotes for concrete-strength-grade signals such as `C30`, `C40`, `C50`, `C60`, or `C60/75`
 - resolve `fc_basis` before doing any normalization or downstream interpretation of `fc_value`
 - map explicit `150 mm cube` or equivalent standard-cube wording to `fc_basis = cube`
 - map explicit cylinder wording, cylinder dimensions, `ASTM C39`, `JIS A 1108`, `JIS A 1132`, or equivalent cylinder-test descriptions to `fc_basis = cylinder`
 - map explicit prism-strength / axial-compressive-strength wording to `fc_basis = prism`
 - in Chinese GB/T 50010-type context, treat bare `C60`, `C70`, and similar `C` grades as cube-strength grades unless the paper itself contradicts that reading
+- in the same Chinese GB/T 50010-type context, a nearby single-grade `C30` / `C40` / `C50`-style signal must be checked before a nearby bare `fck` / `fc` symbol is allowed to lock `fc_basis = prism`
 - in the same Chinese GB/T 50010-type context, treat `fck` and `fc` as prism/axial-system values, not cylinder strengths
 - in Eurocode / EN 206 context, read `Cx/y` as `x = cylinder`, `y = cube`; do not collapse it to a single-basis guess
 - in Eurocode / EN 206 context, treat `fck` as the characteristic cylinder compressive strength; when a European paper writes `fck` without a `Cx/y` grade, use `fc_basis = cylinder`
@@ -154,6 +156,7 @@ Then:
 - treat a bare single-value `C60` outside explicit Chinese cube context as ambiguous; inspect the cited code and the material/property section before choosing `cube` or `cylinder`
 - the same symbol means different things across codes: China `fck` (axial/prism, e.g., C60 → 38.5 MPa) is NOT Eurocode `fck` (cylinder, e.g., C60/75 → 60 MPa); China `fc` (axial design value) is NOT US `f'c` (specified cylinder strength); Japan `Fc` (JIS cylinder-based design standard strength) is NOT interchangeable with Chinese `fc` or US `f'c`; always check which code governs the specimen before interpreting these symbols
 - when both cube and cylinder values are reported, prefer the value the authors explicitly use in the specimen-property table, material parameters, constitutive model, or design/check calculations
+- if a nearby `Cxx` grade signal and a nearby `fck` / `fc` symbol point to different bases, and no explicit cube / cylinder / prism test description resolves the conflict, set `fc_basis = unknown`
 - if the paper still does not identify the basis defensibly, set `fc_basis = unknown` and keep `fcy150 = null`
 - when the basis is inferred from code/notation context rather than an explicit specimen description, mark `quality_flags` with `context_inferred_fc_basis`
 
