@@ -374,6 +374,8 @@ Each specimen `evidence` object must contain:
 - `setup_image`
 - `value_origin`
 
+For specimen rows sourced from tables, `table_image` must point to the corresponding `table/` image that was actually read during extraction. Do not leave table-image evidence empty when a row was extracted from a paper table.
+
 `value_origin` is a dictionary keyed by field name. Each populated field entry should contain:
 
 - `kind`: `direct`, `derived`, `normalized`, or `recovered_from_image`
@@ -452,9 +454,20 @@ If the paper does not name `L` directly but the specimen/setup figure makes the 
 
 Do not populate `L` when the geometry basis is ambiguous. Do not infer `L` from boundary-condition assumptions or effective-length formulas.
 
-## 11. Markdown Table Corruption Gate
+## 11. Markdown/Table Image Reconciliation Gate
 
-Treat markdown table text as invalid and switch to image-first recovery when any holds:
+Reading the corresponding `table/` image is mandatory for every specimen-bearing table used in extraction. The table image is not a fallback; it is part of the normal extraction evidence.
+
+For each specimen-bearing table:
+
+- read the markdown table text and the corresponding `table/` image together
+- use markdown/context to locate table ids, row labels, and nearby notes
+- use the `table/` image as the primary authority for row boundaries, merged cells, scalar assignment, units, symbols, and signs
+- confirm that the markdown row/header mapping is consistent with the image before storing values
+
+Treat the markdown table text as insufficient on its own whenever you are writing specimen values. If markdown and image disagree, prefer the image and keep a `quality_flags` marker.
+
+Common disagreement signals include:
 
 - merged specimen labels
 - one cell contains multiple candidate scalar values
@@ -463,11 +476,7 @@ Treat markdown table text as invalid and switch to image-first recovery when any
 - a source/reference column contains load-like numbers
 - OCR split fragments make scalar assignment ambiguous
 
-When recovery is needed:
-
-- use `table/` image as primary evidence
-- use markdown/context only as locator support
-- preserve a `quality_flags` marker
+If a required specimen-bearing table does not have a corresponding readable `table/` image, stop with a clear processing failure instead of extracting from markdown alone.
 
 ## 12. Invalid And Failed Outputs
 

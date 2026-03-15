@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
-"""Validate one CFST extraction JSON against schema v2.1 rules."""
+"""Validate one CFST extraction JSON against schema v2.1 rules.
+
+This strict skill variant requires the validator to run inside worker_sandbox.py.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+
+def _assert_sandbox() -> None:
+    if os.environ.get("CFST_SANDBOX") != "1":
+        print("[FAIL] This script must run inside worker_sandbox.py (CFST_SANDBOX=1 not set).", file=sys.stderr)
+        raise SystemExit(1)
 
 EPS = 1e-3
 
@@ -711,7 +722,10 @@ def validate_payload(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate single-paper CFST extraction JSON v2.1.")
+    _assert_sandbox()
+    parser = argparse.ArgumentParser(
+        description="Validate single-paper CFST extraction JSON v2.1. Requires CFST_SANDBOX=1."
+    )
     parser.add_argument("--json-path", required=True, help="Path to extraction JSON file.")
     parser.add_argument(
         "--expect-valid",

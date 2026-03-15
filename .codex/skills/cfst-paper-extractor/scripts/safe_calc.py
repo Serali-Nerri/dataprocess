@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
-"""Safe arithmetic calculator for deterministic extraction math."""
+"""Safe arithmetic calculator for deterministic extraction math.
+
+This strict skill variant requires the helper to run inside worker_sandbox.py.
+"""
 
 from __future__ import annotations
 
 import argparse
 import ast
 import operator
+import os
+import sys
 from typing import Any
+
+
+def _assert_sandbox() -> None:
+    if os.environ.get("CFST_SANDBOX") != "1":
+        print("[FAIL] This script must run inside worker_sandbox.py (CFST_SANDBOX=1 not set).", file=sys.stderr)
+        raise SystemExit(1)
 
 
 ALLOWED_BIN_OPS = {
@@ -79,8 +90,9 @@ def safe_eval(expression: str, variables: dict[str, float]) -> float:
 
 
 def main() -> int:
+    _assert_sandbox()
     parser = argparse.ArgumentParser(
-        description="Evaluate arithmetic expressions safely for CFST extraction math.",
+        description="Evaluate arithmetic expressions safely for CFST extraction math. Requires CFST_SANDBOX=1.",
     )
     parser.add_argument("expression", help='Expression to evaluate, for example "141.4 / 2".')
     parser.add_argument(

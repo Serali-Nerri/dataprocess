@@ -2,7 +2,7 @@
 """Run a worker command in a strict bubblewrap filesystem sandbox.
 
 The sandbox only exposes:
-- one paper directory (read-write)
+- one paper directory (read-only)
 - one output directory (read-write)
 - skill policy paths (read-only): SKILL.md, references/, scripts/
 """
@@ -194,7 +194,8 @@ def main() -> int:
     for dst in _unique_sorted_dirs(mkdir_targets):
         cmd.extend(["--dir", dst])
 
-    cmd.extend(["--bind", str(paper_abs), paper_dst])
+    # Keep source paper inputs immutable; only the declared output directory is writable.
+    cmd.extend(["--ro-bind", str(paper_abs), paper_dst])
     cmd.extend(["--bind", str(output_abs), output_dst])
     cmd.extend(["--ro-bind", str(skill_file), skill_file_dst])
     cmd.extend(["--ro-bind", str(references_dir), references_dst])

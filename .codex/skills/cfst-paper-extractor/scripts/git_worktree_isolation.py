@@ -103,10 +103,10 @@ def _build_sandbox_paths(
     skill_root = (wt_path / skill_rel).resolve()
 
     allowed_rw = [
-        str(paper_path),
         str(output_path),
     ]
     allowed_ro = [
+        str(paper_path),
         str(skill_root / "SKILL.md"),
         str(skill_root / "references"),
         str(skill_root / "scripts"),

@@ -22,7 +22,7 @@ This creates `parsed_with_tables/`, `manifests/`, `tmp/`, `output/`, and `logs/`
 2. Before extracting or repairing a paper, read:
 
 - `references/extraction-rules.md` for schema, ordinary-CFST rules, evidence requirements, and numeric constraints.
-- `references/single-flow.md` for the worker contract, execution order, setup-image and table-recovery rules, and retry behavior.
+- `references/single-flow.md` for the worker contract, execution order, setup-image rules, mandatory table-image reconciliation, and retry behavior.
 
 To jump within those files, run:
 
@@ -31,14 +31,22 @@ rg -n "^## " .codex/skills/cfst-paper-extractor/references/extraction-rules.md \
   .codex/skills/cfst-paper-extractor/references/single-flow.md
 ```
 
-3. Write one paper only to its worker-local temp JSON, then validate it.
+3. Write one paper only to its worker-local temp JSON inside the worker sandbox, then validate that same temp JSON before the worker exits.
 
 ```bash
-python .codex/skills/cfst-paper-extractor/scripts/validate_single_output.py \
-  --json-path runs/a1_demo/tmp/A1-1/A1-1.json \
-  --expect-valid true \
-  --strict-rounding
+python .codex/skills/cfst-paper-extractor/scripts/worker_sandbox.py \
+  --worktree-path <worker_worktree> \
+  --paper-dir-relpath runs/a1_demo/parsed_with_tables/A1-1 \
+  --output-dir runs/a1_demo/tmp/A1-1 \
+  --cwd-mode workspace \
+  -- \
+  python .codex/skills/cfst-paper-extractor/scripts/validate_single_output.py \
+    --json-path runs/a1_demo/tmp/A1-1/A1-1.json \
+    --expect-valid true \
+    --strict-rounding
 ```
+
+Direct parent-shell calls to `scripts/validate_single_output.py` and `scripts/safe_calc.py` are intentionally rejected in this strict variant; both helpers require `CFST_SANDBOX=1` and must run under `scripts/worker_sandbox.py`.
 
 Add `--expect-count N` when the paper has a known specimen count.
 
@@ -77,9 +85,10 @@ python .codex/skills/cfst-paper-extractor/scripts/checkpoint_output_commits.py \
 
 - Process exactly one normalized paper folder.
 - Require these inputs: `<paper_token>.md`, `<paper_token>_content_list_v2.json`, `images/`, and `table/`.
-- Read the markdown first for context, then use setup images and table images as evidence when the references require them.
+- Read the markdown first for context, then read the relevant `table/` images for every specimen-bearing table used in extraction.
+- Extract table data by reconciling the markdown table text against the corresponding `table/` image; do not extract specimen rows from markdown tables alone.
 - Resolve `fc_basis` by following `references/extraction-rules.md` §6.2.1 (Concrete-Strength Basis Resolution). Before interpreting symbols such as `fck`, `fc`, `f'c`, or `Fc`, first search nearby material/property text, table headers, and footnotes for concrete-strength-grade signals such as `C30`, `C40`, `C50`, `C60`, or `C60/75`. That section defines the priority order, country/context rules, cross-code symbol disambiguation, and ambiguity fallback. Do not assign `fc_basis` without consulting those rules.
-- Use `scripts/safe_calc.py` for conversions, rounding, and derived values; do not do ad hoc arithmetic.
+- Inside the worker sandbox, use `scripts/safe_calc.py` for conversions, rounding, and derived values; do not do ad hoc arithmetic.
 - Preserve eccentricity signs exactly as source evidence shows them.
 - Do not exclude ordinary CFST specimens from the dataset based on the sign pattern of `e1` and `e2` alone.
 - Preserve recycled aggregate replacement ratio `R%` in `r_ratio`.
@@ -108,6 +117,8 @@ python .codex/skills/cfst-paper-extractor/scripts/bootstrap_git_repo.py \
 
 - Create every worker environment with `scripts/git_worktree_isolation.py create`.
 - Launch every worker only through `scripts/worker_sandbox.py`.
+- The paper folder is mounted read-only inside the sandbox; only the declared worker-local temp output directory is writable.
+- `scripts/safe_calc.py` and `scripts/validate_single_output.py` are sandbox-only helpers in this variant; they fail fast if `CFST_SANDBOX=1` is missing.
 - Require `bubblewrap` or `bwrap`.
 - Treat sandbox startup failure as fatal; do not fall back to unsandboxed execution.
 - Remove finished worktrees with `scripts/git_worktree_isolation.py remove`.
@@ -116,15 +127,15 @@ python .codex/skills/cfst-paper-extractor/scripts/bootstrap_git_repo.py \
 
 - `scripts/prepare_batch.py`: preferred entry point; discover raw paper folders, normalize them, and write manifests/state for worker orchestration.
 - `scripts/reorganize_parsed_with_tables.py`: run standalone only when you need normalization without the full batch wrapper or need a dry run or summary.
-- `scripts/validate_single_output.py`: validate one schema-v2 JSON for shape, provenance, plausibility, ordinary-filter consistency, and rounding.
+- `scripts/validate_single_output.py`: sandbox-only validator for one worker-local schema-v2 JSON; checks shape, provenance, plausibility, ordinary-filter consistency, and rounding.
 - `scripts/publish_validated_output.py`: revalidate worker outputs, publish final JSON, and append a publish log.
 - `scripts/git_worktree_isolation.py`: create and remove per-paper git worktrees with declared sandbox paths.
-- `scripts/worker_sandbox.py`: mandatory worker launcher; never bypass it.
+- `scripts/worker_sandbox.py`: mandatory worker launcher; it mounts paper inputs read-only and the worker-local output directory read-write; never bypass it.
 - `scripts/bootstrap_git_repo.py`: initialize a repo and optional empty commit so worktree execution can start.
 - `scripts/checkpoint_output_commits.py`: commit or push published outputs at fixed intervals when the repository policy calls for output-only checkpoints.
-- `scripts/safe_calc.py`: use for deterministic arithmetic and derived geometry values instead of handwritten calculations.
+- `scripts/safe_calc.py`: sandbox-only arithmetic helper for deterministic conversions and derived geometry values instead of handwritten calculations.
 
 ## Read These References
 
-- `references/extraction-rules.md`: use for schema details, group mapping, required fields, evidence format, loading-mode decisions, numeric rules, and invalid-output handling.
-- `references/single-flow.md`: use for one-paper worker sequencing, required input layout, table-recovery triggers, setup-figure rules, and validation expectations.
+- `references/extraction-rules.md`: use for schema details, group mapping, required fields, evidence format, loading-mode decisions, numeric rules, mandatory table-image reconciliation, and invalid-output handling.
+- `references/single-flow.md`: use for one-paper worker sequencing, required input layout, mandatory table-image reconciliation, setup-figure rules, and validation expectations.

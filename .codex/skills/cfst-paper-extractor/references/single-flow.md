@@ -6,7 +6,7 @@ Section map:
 
 - `## 1-3`: enforce worker scope, required inputs, and execution order.
 - `## 4-5`: apply validity and ordinary-CFST gates.
-- `## 6-10`: resolve setup figures, recover corrupted tables, resolve concrete-strength basis, and preserve numeric and evidence traces.
+- `## 6-10`: resolve setup figures, reconcile mandatory table images with markdown tables, resolve concrete-strength basis, and preserve numeric and evidence traces.
 - `## 11-12`: enforce validation expectations and final output goals.
 
 ## 1. Worker Contract
@@ -36,18 +36,19 @@ If any required path is missing, fail fast and report the missing path.
 1. Read `references/extraction-rules.md`.
 2. Verify required input files exist.
 3. Read markdown first for global context.
-4. Resolve concrete-strength basis evidence from `Materials`, `Specimens`, `Concrete properties`, notation sections, and table footnotes before assigning `fc_basis`. First search for nearby concrete-strength-grade signals such as `C30`, `C40`, `C50`, `C60`, or `C60/75`, then interpret symbols such as `fck`, `fc`, `f'c`, or `Fc`.
-5. Run the validity gate.
-6. Run the ordinary-CFST Tier 1 paper-level preconditions.
-7. Resolve the setup figure from markdown-linked image evidence.
-8. Detect table corruption and switch to `table/` images when needed.
-9. Extract specimen rows.
-10. Normalize units and derived values with `scripts/safe_calc.py`.
-11. Run the ordinary-CFST Tier 2 per-specimen evaluation and tag each specimen with `is_ordinary` and `ordinary_exclusion_reasons`.
-12. Derive paper-level `is_ordinary_cfst` and `ordinary_filter` summary from specimen flags.
-13. Build schema v2.1 JSON.
-14. Validate with `scripts/validate_single_output.py`.
-15. Write only to worker-local JSON path.
+4. Locate and read the relevant `table/` images for every specimen-bearing table referenced by the markdown.
+5. Reconcile markdown tables against the corresponding `table/` images before extracting any specimen row values.
+6. Resolve concrete-strength basis evidence from `Materials`, `Specimens`, `Concrete properties`, notation sections, and table footnotes before assigning `fc_basis`. First search for nearby concrete-strength-grade signals such as `C30`, `C40`, `C50`, `C60`, or `C60/75`, then interpret symbols such as `fck`, `fc`, `f'c`, or `Fc`.
+7. Run the validity gate.
+8. Run the ordinary-CFST Tier 1 paper-level preconditions.
+9. Resolve the setup figure from markdown-linked image evidence.
+10. Extract specimen rows using reconciled markdown-plus-image table evidence.
+11. Normalize units and derived values with `scripts/safe_calc.py`.
+12. Run the ordinary-CFST Tier 2 per-specimen evaluation and tag each specimen with `is_ordinary` and `ordinary_exclusion_reasons`.
+13. Derive paper-level `is_ordinary_cfst` and `ordinary_filter` summary from specimen flags.
+14. Build schema v2.1 JSON.
+15. Validate with `scripts/validate_single_output.py`.
+16. Write only to worker-local JSON path.
 
 ## 4. Validity Gate
 
@@ -120,23 +121,24 @@ Store the resolved setup trace in:
 - specimen `loading_mode`
 - specimen `evidence.setup_image`
 
-## 7. Table Recovery Rules
+## 7. Mandatory Table Reconciliation Rules
 
-Treat markdown table text as untrusted when it shows:
+Relevant `table/` images are mandatory evidence for every specimen-bearing table used in extraction. Do not extract specimen rows from markdown tables alone, even when the OCR text looks clean.
 
-- merged labels
-- one cell with multiple scalar values
-- shifted columns
-- broken load columns
-- broken source/reference columns
-- decimal fragments or merged tokens that make scalar assignment ambiguous
+For each specimen-bearing table:
 
-Then:
+- read the markdown table and the corresponding `table/` image together
+- use markdown as a locator for table id, candidate row labels, and nearby notes
+- use the `table/` image as the authority for row boundaries, merged cells, scalar assignment, units, symbols, and signs
+- confirm row/header alignment across both sources before writing any specimen field
 
-- use `table/` image as primary evidence
-- rebuild row alignment from visual evidence
-- keep eccentricity signs exactly as source evidence shows them
-- mark `quality_flags` such as `ocr_recovered`
+If markdown and image disagree:
+
+- prefer the `table/` image for numeric values, units, signs, and merged-cell interpretation
+- use markdown and nearby prose only to help map row labels, table ids, and footnotes
+- preserve a `quality_flags` marker such as `markdown_table_mismatch` or `ocr_recovered`
+
+If a needed specimen-bearing table has no corresponding readable `table/` image, stop with a clear failure reason instead of extracting from markdown alone.
 
 ## 8. Concrete-Strength Basis Rules
 
